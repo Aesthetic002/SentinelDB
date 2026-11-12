@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SentinelDB</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10);
+  --series-1: #2a78d6; --critical: #d03b3b; --good: #0ca30c; --serious: #ec835a; --wash: rgba(11,11,11,0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+    --series-1: #3987e5; --wash: rgba(255,255,255,0.05);
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 1120px; margin: 0 auto; padding: 24px 20px 48px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 4px; }
+h1 { font-size: 22px; font-weight: 600; margin: 0; }
+h2 { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
+.sub { color: var(--ink-2); margin: 0 0 16px; }
+.note { color: var(--ink-2); font-size: 13px; margin: 0 0 8px; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 16px; }
+.group { display: inline-flex; gap: 8px; align-items: center; }
+.group + .group { padding-left: 16px; margin-left: 8px; border-left: 1px solid var(--axis); }
+button { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px; cursor: pointer; min-height: 32px; }
+button:hover:not(:disabled) { background: var(--wash); }
+button:focus-visible { outline: 2px solid var(--series-1); outline-offset: 1px; }
+button:disabled { color: var(--muted); cursor: default; }
+button[aria-pressed="true"] { border-color: var(--series-1); font-weight: 600; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; margin-bottom: 12px; }
+.nodes { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.node { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.node.leader { border-color: var(--series-1); }
+.node.dead { opacity: 0.65; }
+.node-head { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--axis); flex: none; }
+.leader .dot { background: var(--series-1); }
+.dead .dot { background: var(--critical); }
+.node-meta { color: var(--ink-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+.kpis { display: flex; flex-wrap: wrap; gap: 24px; margin-bottom: 8px; }
+.kpi-label { color: var(--ink-2); font-size: 12px; }
+.kpi-value { font-size: 22px; font-weight: 600; }
+svg { display: block; width: 100%; height: auto; touch-action: none; }
+svg text { font: 11px system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--muted); font-variant-numeric: tabular-nums; }
+svg text.label { fill: var(--ink-2); }
+.tooltip { position: fixed; pointer-events: none; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.12); display: none; z-index: 2; }
+.tooltip strong { font-size: 14px; display: block; }
+.tooltip span { color: var(--ink-2); }
+.log { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow-y: auto; font-variant-numeric: tabular-nums; }
+.log li { padding: 3px 0; border-top: 1px solid var(--grid); display: flex; gap: 12px; }
+.log li:first-child { border-top: 0; }
+.log time { color: var(--muted); flex: none; }
+.err { color: var(--critical); min-height: 20px; font-size: 13px; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 3px 12px 3px 0; border-top: 1px solid var(--grid); }
+th { color: var(--ink-2); font-weight: 600; border-top: 0; }
+summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
+.hide { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <header><h1>SentinelDB</h1><span id="mode" class="note"></span></header>
+  <p class="sub">A live 5-node cluster with a client writing continuously. Everything below is measured, from real processes.</p>
+
+  <div class="controls" role="group" aria-label="Experiment controls">
+    <span class="group" role="group" aria-label="Mode">
+      <button data-op="reactive" id="m-reactive">Plain Raft</button>
+      <button data-op="proactive" id="m-proactive">With prediction</button>
+    </span>
+    <span class="group" role="group" aria-label="Faults">
+      <button data-op="degrade" id="b-degrade">Degrade the leader, then kill it</button>
+      <button data-op="kill">Kill the leader now</button>
+      <button data-op="restart">Restart dead nodes</button>
+    </span>
+  </div>
+  <div id="err" class="err" role="alert"></div>
+
+  <div id="nodes" class="nodes" aria-live="polite"></div>
+
+  <section class="card">
+    <h2>Client write latency</h2>
+    <p class="note">The slowest write in each tenth of a second, over the last 45 seconds. Shaded bands are outages: a stretch of at least 250 ms with no write completing.</p>
+    <div class="kpis">
+      <div><div class="kpi-label">Longest outage in view</div><div class="kpi-value" id="k-outage">-</div></div>
+      <div><div class="kpi-label">Writes committed</div><div class="kpi-value" id="k-writes">-</div></div>
+      <div><div class="kpi-label">Latency, last second</div><div class="kpi-value" id="k-lat">-</div></div>
+    </div>
+    <div id="lat-chart"></div>
+  </section>
+
+  <section class="card" id="prob-card">
+    <h2>Predicted probability the leader is about to fail</h2>
+    <p class="note" id="prob-note"></p>
+    <div id="prob-chart"></div>
+  </section>
+
+  <section class="card">
+    <h2>Events</h2>
+    <ul id="log" class="log"></ul>
+  </section>
+
+  <section class="card">
+    <details>
+      <summary>Table view of recent writes</summary>
+      <table>
+        <thead><tr><th>Completed</th><th>Latency</th><th>Result</th></tr></thead>
+        <tbody id="tbl"></tbody>
+      </table>
+    </details>
+  </section>
+</main>
+<div id="tooltip" class="tooltip" role="status"></div>
+
+<script>
+"use strict";
+const HISTORY_MS = 45000, OUTAGE_MS = 250, NS = "http://www.w3.org/2000/svg";
+const $ = id => document.getElementById(id);
+let state = null, threshold = null;
+
+function el(name, attrs, parent) {
+  const e = document.createElementNS(NS, name);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function clock(ms) { return new Date(ms).toLocaleTimeString(); }
+function fmtMs(ms) { return ms >= 1000 ? (ms / 1000).toFixed(2) + " s" : Math.round(ms) + " ms"; }
+
+function niceMax(v) {
+  for (const n of [20, 40, 100, 200, 400, 1000, 2000, 4000, 10000, 20000]) if (v <= n) return n; // each divides into clean ticks
+  return Math.ceil(v / 10000) * 10000;
+}
+function ticks(max) {
+  const step = max / 4;
+  return [0, step, step * 2, step * 3, max];
+}
+
+// Draws a line chart on one axis, with a crosshair and a single tooltip.
+function drawChart(host, opts) {
+  const W = 1040, H = opts.height, L = 52, R = 16, T = 10, B = 24;
+  host.textContent = "";
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": opts.label }, host);
+  const x = t => L + (t - opts.from) / (opts.to - opts.from) * (W - L - R);
+  const y = v => T + (1 - v / opts.max) * (H - T - B);
+
+  // Outages sit behind everything, as a quiet wash with the critical status colour.
+  for (const b of opts.bands || []) {
+    el("rect", { x: x(b.from), y: T, width: Math.max(x(b.to) - x(b.from), 2), height: H - T - B,
+      fill: "var(--critical)", "fill-opacity": 0.12 }, svg);
+    const label = el("text", { x: x(b.from) + 4, y: T + 12, class: "label" }, svg);
+    if (x(b.to) - x(b.from) > 20 || b.big) label.textContent = fmtMs(b.to - b.from);
+  }
+  for (const t of ticks(opts.max)) {
+    el("line", { x1: L, x2: W - R, y1: y(t), y2: y(t), stroke: t === 0 ? "var(--axis)" : "var(--grid)", "stroke-width": 1 }, svg);
+    const lbl = el("text", { x: L - 8, y: y(t) + 4, "text-anchor": "end" }, svg);
+    lbl.textContent = opts.tick(t);
+  }
+  for (let s = 0; s <= 45; s += 15) {
+    const t = opts.to - s * 1000;
+    const lbl = el("text", { x: x(t), y: H - 6, "text-anchor": s === 0 ? "end" : s === 45 ? "start" : "middle" }, svg);
+    lbl.textContent = s === 0 ? "now" : `-${s}s`;
+  }
+  if (opts.threshold != null) {
+    el("line", { x1: L, x2: W - R, y1: y(opts.threshold), y2: y(opts.threshold), stroke: "var(--ink-2)", "stroke-width": 1 }, svg);
+    const lbl = el("text", { x: L + 4, y: y(opts.threshold) - 5, class: "label" }, svg); // left, where old data is quietest
+    lbl.textContent = "handover threshold";
+  }
+  // Break the line wherever writes stopped, rather than drawing a slope through an outage.
+  let d = "", prev = null;
+  for (const p of opts.points) {
+    const clipped = Math.min(p.v, opts.max);
+    d += (prev === null || p.t - prev > OUTAGE_MS * 4 ? "M" : "L") + x(p.t).toFixed(1) + " " + y(clipped).toFixed(1);
+    prev = p.t;
+  }
+  el("path", { d, fill: "none", stroke: "var(--series-1)", "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
+  if (opts.points.length) {
+    const lastP = opts.points[opts.points.length - 1];
+    el("circle", { cx: x(lastP.t), cy: y(Math.min(lastP.v, opts.max)), r: 4, fill: "var(--series-1)", stroke: "var(--surface)", "stroke-width": 2 }, svg);
+  }
+
+  // Hover layer: a crosshair that snaps to the nearest point in time.
+  const hair = el("line", { y1: T, y2: H - B, stroke: "var(--axis)", "stroke-width": 1, visibility: "hidden" }, svg);
+  const hit = el("rect", { x: L, y: T, width: W - L - R, height: H - T - B, fill: "transparent", tabindex: 0,
+    "aria-label": opts.label + ": use left and right arrows to read values" }, svg);
+  const tip = $("tooltip");
+  let idx = opts.points.length - 1;
+  const show = (i, cx, cy) => {
+    const p = opts.points[i];
+    if (!p) return;
+    hair.setAttribute("x1", x(p.t)); hair.setAttribute("x2", x(p.t)); hair.setAttribute("visibility", "visible");
+    tip.textContent = "";
+    const s = document.createElement("strong"); s.textContent = opts.tick(p.v);
+    const a = document.createElement("span"); a.textContent = opts.series + " at " + clock(p.t);
+    tip.append(s, a);
+    tip.style.display = "block";
+    const r = svg.getBoundingClientRect();
+    tip.style.left = Math.min((cx ?? r.left + x(p.t) * r.width / W) + 12, innerWidth - 220) + "px";
+    tip.style.top = ((cy ?? r.top + 20) + 12) + "px";
+  };
+  const hide = () => { hair.setAttribute("visibility", "hidden"); tip.style.display = "none"; };
+  hit.addEventListener("pointermove", ev => {
+    const r = svg.getBoundingClientRect();
+    const t = opts.from + ((ev.clientX - r.left) * W / r.width - L) / (W - L - R) * (opts.to - opts.from);
+    let best = 0, bd = Infinity;
+    opts.points.forEach((p, i) => { const dd = Math.abs(p.t - t); if (dd < bd) { bd = dd; best = i; } });
+    idx = best;
+    show(best, ev.clientX, ev.clientY);
+    hovering = true;
+  });
+  hit.addEventListener("pointerleave", () => { hide(); hovering = false; });
+  hit.addEventListener("focus", () => { show(idx); hovering = true; });
+  hit.addEventListener("blur", () => { hide(); hovering = false; });
+  hit.addEventListener("keydown", ev => {
+    if (ev.key === "ArrowLeft") idx = Math.max(0, idx - 1);
+    else if (ev.key === "ArrowRight") idx = Math.min(opts.points.length - 1, idx + 1);
+    else return;
+    ev.preventDefault();
+    show(idx);
+  });
+}
+
+let hovering = false;
+
+function outages(writes, now) {
+  const bands = [];
+  const from = now - HISTORY_MS;
+  let last = null;
+  for (const w of writes) {
+    if (!w.ok) continue;
+    if (last !== null && w.t - last >= OUTAGE_MS) bands.push({ from: last, to: w.t });
+    last = w.t;
+  }
+  if (last !== null && now - last >= OUTAGE_MS) bands.push({ from: last, to: now });
+  return bands.filter(b => b.to > from);
+}
+
+function render(s) {
+  state = s;
+  const proactive = s.mode === "proactive";
+  $("mode").textContent = proactive ? "Mode: with prediction" : "Mode: plain Raft (reactive only)";
+  $("m-reactive").setAttribute("aria-pressed", String(!proactive));
+  $("m-proactive").setAttribute("aria-pressed", String(proactive));
+  $("m-proactive").disabled = !s.has_model;
+  $("b-degrade").disabled = !!s.degrading;
+
+  const nodes = $("nodes");
+  nodes.textContent = "";
+  for (const n of s.nodes || []) {
+    const d = document.createElement("div");
+    const dead = !n.alive;
+    const role = dead ? "Dead" : (n.reachable ? n.role : "Unreachable");
+    d.className = "node" + (role === "Leader" ? " leader" : "") + (dead ? " dead" : "");
+    const head = document.createElement("div"); head.className = "node-head";
+    const dot = document.createElement("span"); dot.className = "dot";
+    const name = document.createElement("span"); name.textContent = `${n.id} ${role}`;
+    head.append(dot, name);
+    const meta = document.createElement("div"); meta.className = "node-meta";
+    meta.textContent = dead ? "process killed" : n.reachable ? `term ${n.term}, applied ${n.applied}` : "no response";
+    d.append(head, meta);
+    nodes.appendChild(d);
+  }
+
+  const writes = (s.writes || []);
+  const okWrites = writes.filter(w => w.ok);
+  const bands = outages(writes, s.now);
+  const longest = bands.reduce((m, b) => Math.max(m, b.to - b.from), 0);
+  $("k-outage").textContent = longest ? fmtMs(longest) : "none";
+  $("k-writes").textContent = (s.total_ok ?? 0).toLocaleString();
+  const recent = okWrites.filter(w => w.t >= s.now - 1000);
+  $("k-lat").textContent = recent.length ? fmtMs(recent.reduce((a, w) => a + w.ms, 0) / recent.length) : "-";
+
+  if (hovering) return; // Do not redraw under the pointer; it would lose the crosshair.
+
+  // Plot at most about 1 point per 2 pixels, keeping each bucket's worst value so a spike
+  // cannot disappear in the thinning.
+  const bucket = HISTORY_MS / 500, pts = new Map();
+  for (const w of okWrites) {
+    const k = Math.floor(w.t / bucket);
+    const cur = pts.get(k);
+    if (!cur || w.ms > cur.v) pts.set(k, { t: w.t, v: w.ms });
+  }
+  const points = [...pts.values()].sort((a, b) => a.t - b.t);
+  const peak = points.reduce((m, p) => Math.max(m, p.v), 0);
+  drawChart($("lat-chart"), {
+    label: "Client write latency", series: "Write latency", height: 240, from: s.now - HISTORY_MS, to: s.now,
+    max: niceMax(Math.max(peak, 25)), tick: v => v >= 1000 ? (v / 1000) + " s" : Math.round(v) + " ms", points, bands,
+  });
+
+  $("prob-card").classList.toggle("hide", !proactive);
+  if (proactive) {
+    $("prob-note").textContent = `Read on the current leader, ten times a second. A handover fires after ${s.consecutive} readings in a row over the threshold.`;
+    const probs = (s.probs || []).filter(p => p.t >= s.now - HISTORY_MS).map(p => ({ t: p.t, v: p.p }));
+    drawChart($("prob-chart"), {
+      label: "Predicted probability of failure", series: "Probability", height: 150, from: s.now - HISTORY_MS, to: s.now,
+      max: 1, tick: v => Math.round(v * 100) + "%", points: probs, threshold: s.threshold,
+    });
+  }
+
+  const log = $("log");
+  log.textContent = "";
+  for (const e of [...(s.events || [])].reverse().slice(0, 40)) {
+    const li = document.createElement("li");
+    const t = document.createElement("time"); t.textContent = clock(e.t);
+    const m = document.createElement("span"); m.textContent = e.msg;
+    li.append(t, m);
+    log.appendChild(li);
+  }
+
+  const tb = $("tbl");
+  tb.textContent = "";
+  for (const w of writes.slice(-20).reverse()) {
+    const tr = document.createElement("tr");
+    for (const v of [clock(w.t), fmtMs(w.ms), w.ok ? "committed" : "failed"]) {
+      const td = document.createElement("td"); td.textContent = v; tr.appendChild(td);
+    }
+    tb.appendChild(tr);
+  }
+}
+
+async function poll() {
+  try {
+    const r = await fetch("api/state");
+    if (r.ok) render(await r.json());
+  } catch (e) { /* the previous render stays visible until the server returns */ }
+  setTimeout(poll, 500);
+}
+
+document.querySelectorAll("button[data-op]").forEach(b => b.addEventListener("click", async () => {
+  $("err").textContent = "";
+  b.disabled = true;
+  try {
+    const r = await fetch("api/action/" + encodeURIComponent(b.dataset.op), { method: "POST" });
+    if (!r.ok) $("err").textContent = (await r.text()).trim();
+  } catch (e) {
+    $("err").textContent = "Could not reach the lab server.";
+  }
+  b.disabled = false;
+}));
+
+poll();
+</script>
+</body>
+</html>

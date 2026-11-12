@@ -2,7 +2,7 @@
 tags: [sentinel-db, distributed-systems, motivation, papers]
 aliases: [SentinelDB Inspiration, SentinelDB Related Work]
 created: 2026-10-13
-updated: 2026-10-13
+updated: 2026-11-04
 ---
 
 # Why We Built This — Inspiration and Related Papers
@@ -47,7 +47,9 @@ Most fault-tolerant systems, including a plain implementation of Raft, are *reac
 - **"Proactive Fault Tolerance using Heartbeat Strategy for Fault Detection"** — [paper](https://www.researchgate.net/publication/354532918_Proactive_Fault_Tolerance_using_Heartbeat_Strategy_for_Fault_Detection)
 - **"Time-Series Learning for Proactive Fault Prediction in Distributed Systems with Deep Neural Structures"** (arXiv, 2025) — [paper](https://arxiv.org/abs/2505.20705)
 
-These confirmed the core idea is a real, active research direction, not something we made up to sound clever. Where SentinelDB differs from most of what's published here: a lot of this line of work uses deep learning (neural networks) to make the prediction. We deliberately use classical, interpretable models instead — Decision Trees, Naive Bayes, Logistic Regression, Random Forests (see [[6 - How Failure Prediction Works|How Failure Prediction Works]]) — partly because that's genuinely what our AI/ML coursework covers, and partly because an interpretable model is actually an advantage here: if a judge asks "why did it predict this node was failing," we can point to the exact decision rule, not shrug at a black box.
+These confirmed the core idea is a real, active research direction, not something we made up to sound clever. Where SentinelDB differs from most of what's published here: a lot of this line of work uses deep learning (neural networks) to make the prediction. We deliberately use classical models instead — Decision Trees, Naive Bayes, Logistic Regression, Random Forests (see [[6 - How Failure Prediction Works|How Failure Prediction Works]]) — partly because that's genuinely what our AI/ML coursework covers, and partly because they're easier to explain.
+
+One honest wrinkle: the model that won the comparison and got deployed is the Random Forest, which is the hardest of the four to explain in one sentence. A single Decision Tree came a close second (51 of 52 failures caught against 52 of 52, but with 2.7 seconds of warning against 4.4). So if a judge asks "why did it predict this node was failing," the honest answer is that we can show which signals the forest relied on, and we can read out the runner-up tree's exact rules, but the deployed model is 50 trees voting rather than one rule. We chose the better result over the easier explanation, and say so.
 
 ## Why we made the decisions we made, summarized
 
@@ -56,4 +58,6 @@ These confirmed the core idea is a real, active research direction, not somethin
 | Raft over Paxos | Deliberately designed to be understandable and explainable, which matters when two people have to build and defend the whole thing |
 | Exhaustive state-space checking over "just testing" | The one failure mode that matters most (split leadership) deserves a stronger guarantee than "we ran it a lot and it seemed fine" — and real researchers (Verdi/CPP16) have shown this class of technique is worth doing for Raft specifically |
 | A real SQL layer over a raw key-value store | Production systems that actually matter (CockroachDB, TiKV) are built exactly this way — SQL on top, replicated shards underneath — so it's not an arbitrary addition, it's the realistic shape of the problem |
-| Classical ML over deep learning for failure prediction | Matches what the course actually teaches, and gives us an explainable decision rule instead of a black box, which is a real advantage when defending the result |
+| Classical ML over deep learning for failure prediction | Matches what the course actually teaches, and stays explainable. The deployed model is a Random Forest because it measurably beat the single tree, which remains available as a readable set of rules |
+| Go for the system, Python only for training | One fast static binary per node with no dependencies, while keeping scikit-learn for the coursework. Trained models are exported to JSON and evaluated in Go, so no Python runs in the live path, and a test checks the two give the same answers |
+| Training on gradual degradation rather than on killed processes | A killed process shows no warning signs beforehand, so calling the moments before a kill "about to fail" would only teach the model noise |

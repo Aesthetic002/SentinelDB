@@ -2,7 +2,7 @@
 tags: [sentinel-db, distributed-systems, raft, leader-election]
 aliases: [SentinelDB Raft, SentinelDB Leader Election]
 created: 2026-10-13
-updated: 2026-10-13
+updated: 2026-11-04
 ---
 
 # How Leader Election Works
@@ -19,7 +19,7 @@ At any moment, every node is in exactly one of three roles:
 
 - **Follower** — the default, passive state. A follower just listens, stores whatever the leader tells it to, and replies to messages.
 - **Candidate** — a temporary state a node enters when it thinks the leader might be gone and it's trying to become the new leader itself.
-- **Leader** — the one node currently allowed to accept new writes from clients and decide the order they happen in. There is supposed to be at most one of these at any given time.
+- **Leader** — the one node currently allowed to accept new writes from clients and decide the order they happen in. There is at most one per term. For a brief moment two nodes can both *believe* they lead, in different terms: an old leader that hasn't heard the news yet. That is harmless, because it can no longer reach a majority, and [[5 - How We Prove It Cant Break|the safety check]] covers it explicitly.
 
 ## Terms: how the system avoids confusion about "which round" it's in
 
@@ -39,11 +39,19 @@ Once a leader is elected, every write a client sends goes through it. The leader
 
 With 5 nodes, this means the system can lose any 2 nodes at once and keep working perfectly — a concrete number worth having ready if someone asks "how much failure can this actually tolerate."
 
+A test kills nodes one at a time to confirm this: with 2 of 5 gone it keeps writing, and with 3 gone it refuses writes rather than risk anything, then recovers with nothing lost or invented once a majority returns.
+
+### One rule the short version leaves out
+
+"Committed once a majority have it" has an exception that catches out real implementations. A new leader must not treat an entry from an *older* term as committed just because a majority now hold it, because a node with a newer entry at that position could still win an election and overwrite it (this is Figure 8 of the Raft paper). A leader can only count replicas of entries from its own term, and earlier entries commit along with them. That's why every new leader immediately appends an empty entry of its own: it lets the leader learn what's committed without waiting for a client to write something. Our model checker found this bug by itself when we deliberately removed the rule.
+
 ## What happens when the leader dies
 
-**The normal (reactive) way:** followers simply stop hearing heartbeats, their timers run out, and a new election happens as described above. The catch is that this takes however long the timeout is set to — during that window, there's no leader, so the system can't accept new writes. That gap is real, user-visible downtime.
+**The normal (reactive) way:** followers simply stop hearing heartbeats, their timers run out, and a new election happens as described above. The catch is that this takes however long the timeout is set to — during that window, there's no leader, so the system can't accept new writes. That gap is real, user-visible downtime: in our measurements about 0.9 seconds, with the timeout set to between 500 and 1000 ms. It scales with that setting, which can't simply be made tiny, because on a real network that causes needless elections.
 
-**The way SentinelDB improves on this:** instead of only reacting once the leader has gone fully silent, a machine-learning model (covered in [[6 - How Failure Prediction Works|How Failure Prediction Works]]) watches the leader's heartbeat pattern for early signs of trouble — growing response times, irregular gaps — and when it's confident something's wrong, it triggers Raft's built-in **leadership transfer**: the current leader voluntarily hands control to a healthy follower *before* it actually goes silent. This is a graceful, near-instant handover instead of a multi-second gap followed by an election, and it's the single biggest practical difference between SentinelDB and a plain textbook Raft implementation.
+**The way SentinelDB improves on this:** instead of only reacting once the leader has gone fully silent, a machine-learning model (covered in [[6 - How Failure Prediction Works|How Failure Prediction Works]]) running on the leader watches its heartbeat round trips for early signs of trouble — growing response times, irregular gaps, missed replies — and when it's confident something's wrong, it triggers Raft's built-in **leadership transfer**: the current leader voluntarily hands control to a healthy follower *before* it actually goes silent. The leader stops accepting new writes, makes sure the chosen follower has its whole log, and tells it to start an election straight away. Measured on live clusters, the longest gap in writes falls to about 200 ms, and it's the single biggest practical difference between SentinelDB and a plain textbook Raft implementation.
+
+Two limits are worth saying out loud. A leader that dies with no warning signs still costs the normal timeout, because there was nothing to predict. And a transfer can fail: if it hasn't finished within one election timeout, the leader abandons it and carries on, and ordinary elections remain the safety net. Either way, a transfer goes through normal voting, so a wrong prediction can cost an unnecessary handover but can't break anything.
 
 ## What this protocol does and doesn't protect against
 

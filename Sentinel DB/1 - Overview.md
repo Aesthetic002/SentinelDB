@@ -2,7 +2,7 @@
 tags: [sentinel-db, distributed-systems, overview]
 aliases: [SentinelDB, Sentinel DB Overview]
 created: 2026-10-13
-updated: 2026-10-13
+updated: 2026-11-04
 ---
 
 # SentinelDB — Overview
@@ -11,12 +11,12 @@ This is the starting note. It tells you what SentinelDB actually is, why it exis
 
 ## What SentinelDB actually is
 
-SentinelDB is a small database that keeps its data copied across several machines instead of one, so that if one machine crashes, nothing is lost and almost nothing is noticed. Underneath, it's built from four ideas stacked on top of each other:
+SentinelDB is a small database that keeps its data copied across several machines instead of one, so that if one machine crashes, nothing that was committed is lost and service resumes in under a second. Underneath, it's built from four ideas stacked on top of each other:
 
 1. A **consensus protocol** (based on Raft) that keeps the copies in agreement, even while machines crash and restart.
 2. A **real relational database** on top of that — tables, a small SQL language, proper schema design — not just a bucket of key-value pairs.
-3. A **formal safety check**, where instead of just testing the system and hoping, we modelled it mathematically and checked, by brute force, that its single worst possible failure (two machines both thinking they're in charge at once) genuinely cannot happen.
-4. A **machine-learning predictor** that watches for early warning signs a machine is about to fail, and switches control away from it *before* it actually dies, instead of waiting for a timeout.
+3. A **formal safety check**, where instead of just testing the system and hoping, we modelled it mathematically and checked, by brute force, that its single worst possible failure (two machines both in charge in the same term) cannot happen anywhere in that model.
+4. A **machine-learning predictor** that watches for early warning signs a machine is about to fail, and switches control away from it *before* it actually dies, instead of waiting for a timeout. It can only help when there are warning signs: a machine that dies with no warning still gets the normal timeout.
 
 None of these four ideas is new on its own — they're all things real systems and real research already do. What makes this project worth doing is combining them into one working system, small enough for two people to build and explain, but honest and rigorous enough to defend under questioning.
 
@@ -35,7 +35,18 @@ Read them in this order if you're starting from zero:
 5. [[6 - How Failure Prediction Works|How Failure Prediction Works]] — the machine-learning layer that predicts failures early.
 6. [[7 - How It All Connects (Architecture)|How It All Connects]] — walks through what actually happens, step by step, for a normal request and for a failure, tying all the pieces together.
 7. [[8 - Security - What's Protected and What Isn't|Security]] — what this system actually defends against, and what it honestly doesn't.
+8. [[9 - How to Give the Demo|How to Give the Demo]] — the step-by-step script for showing all of this working live, and the questions to expect.
+
+## Where the project stands
+
+All four layers are built and measured. The headline numbers, each explained in its own note:
+
+- **Prediction:** when a node degrades gradually and then dies, the longest stretch with no write completing falls from a median of **910 ms to 196 ms**, and leadership moved before the death in **40 of 40** trials. There were **no false handovers in 70 trials** of conditions built to look like failure, which puts the rate below about 4% of runs. A sudden kill shows no significant difference, as expected.
+- **Safety:** **8 models** explored exhaustively, up to 3.5 million states, with no violations, and all 8 bugs injected on purpose were found.
+- **Replication:** acknowledged writes survived repeated leader kills, with none lost or applied twice, in the tests that kill a leader while writing.
+
+The repo's `README.md` has how to run it, and `docs/verification.md` says exactly how far each claim goes.
 
 ## The one-sentence version, if someone stops you in a corridor
 
-"It's a database that copies itself across several machines so it never goes down from one machine failing, it mathematically proves its most dangerous bug can't happen instead of just testing for it, and it predicts a machine dying before it actually does, so the handover is smooth instead of jarring."
+"It's a database that copies itself across several machines so it keeps working when one fails, it exhaustively checks a model of itself to show its most dangerous bug can't happen instead of just testing for it, and when a machine starts showing warning signs it hands over before the machine dies, so the handover is smooth instead of jarring."

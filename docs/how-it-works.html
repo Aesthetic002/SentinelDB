@@ -1,0 +1,1055 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How SentinelDB Works</title>
+<style>
+:root {
+  --bg:#f6f5f1; --surface:#ffffff; --surface-2:#efede7; --text:#1c1c1a; --text-2:#55534d; --muted:#8a877f; --line:#d8d5cc;
+  --lead:#b86200; --lead-bg:#fff0d9;
+  --fol:#2c68ad; --fol-bg:#e4eefa;
+  --cand:#7448bd; --cand-bg:#eee6fb;
+  --cli:#2a8352; --cli-bg:#e0f3e8;
+  --dead:#b03a3a; --dead-bg:#f8e2e2;
+  --disk:#6b675f; --disk-bg:#eae8e2;
+  --code-bg:#ecebe5;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:#141412; --surface:#1d1d1a; --surface-2:#262622; --text:#ecebe6; --text-2:#b8b5ac; --muted:#858279; --line:#3a3934;
+    --lead:#f0a33a; --lead-bg:#3a2a12;
+    --fol:#71a9ee; --fol-bg:#172638;
+    --cand:#b495f0; --cand-bg:#2a2140;
+    --cli:#62c48e; --cli-bg:#163024;
+    --dead:#ee7f7f; --dead-bg:#3b1c1c;
+    --disk:#a9a59b; --disk-bg:#2b2a26;
+    --code-bg:#2a2a26;
+  }
+}
+:root[data-theme="dark"] {
+  --bg:#141412; --surface:#1d1d1a; --surface-2:#262622; --text:#ecebe6; --text-2:#b8b5ac; --muted:#858279; --line:#3a3934;
+  --lead:#f0a33a; --lead-bg:#3a2a12;
+  --fol:#71a9ee; --fol-bg:#172638;
+  --cand:#b495f0; --cand-bg:#2a2140;
+  --cli:#62c48e; --cli-bg:#163024;
+  --dead:#ee7f7f; --dead-bg:#3b1c1c;
+  --disk:#a9a59b; --disk-bg:#2b2a26;
+  --code-bg:#2a2a26;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+main { max-width: 1040px; margin: 0 auto; padding: 32px 16px 80px; }
+h1 { font-size: 2.1rem; line-height: 1.2; margin: 0 0 12px; letter-spacing: -0.01em; }
+h2 { font-size: 1.45rem; margin: 64px 0 8px; line-height: 1.3; }
+h2 .num { color: var(--muted); font-weight: 500; margin-right: 8px; }
+h3 { font-size: 1.1rem; margin: 28px 0 6px; }
+p { margin: 10px 0; max-width: 72ch; }
+.lede { font-size: 1.12rem; color: var(--text-2); max-width: 66ch; }
+code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+a { color: var(--fol); }
+
+.legend { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 20px 0 0; font-size: 0.9rem; color: var(--text-2); }
+.chip { display: inline-flex; align-items: center; gap: 6px; }
+.dot { width: 12px; height: 12px; border-radius: 3px; border: 2px solid; display: inline-block; }
+.dot.lead { background: var(--lead-bg); border-color: var(--lead); }
+.dot.fol { background: var(--fol-bg); border-color: var(--fol); }
+.dot.cand { background: var(--cand-bg); border-color: var(--cand); }
+.dot.cli { background: var(--cli-bg); border-color: var(--cli); }
+.dot.dead { background: var(--dead-bg); border-color: var(--dead); }
+.dot.disk { background: var(--disk-bg); border-color: var(--disk); }
+
+nav.toc { margin: 28px 0 0; padding: 16px 20px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+nav.toc ol { margin: 0; padding-left: 22px; columns: 2 260px; column-gap: 32px; }
+nav.toc li { margin: 2px 0; break-inside: avoid; }
+nav.toc a { color: var(--text); text-decoration: none; }
+nav.toc a:hover { text-decoration: underline; }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin: 18px 0; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+.card h4 { margin: 0 0 6px; font-size: 1rem; }
+.card p { margin: 0; font-size: 0.95rem; color: var(--text-2); }
+.card.lead { border-left: 4px solid var(--lead); }
+.card.fol { border-left: 4px solid var(--fol); }
+.card.cli { border-left: 4px solid var(--cli); }
+
+figure { margin: 18px 0 8px; }
+.fig { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 8px; overflow-x: auto; }
+.fig svg { display: block; width: 100%; min-width: 720px; height: auto; }
+figcaption { font-size: 0.9rem; color: var(--text-2); margin-top: 8px; max-width: 80ch; }
+
+.callout { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--cand); border-radius: 10px; padding: 12px 16px; margin: 16px 0; max-width: 80ch; }
+.callout strong { color: var(--text); }
+
+table { border-collapse: collapse; width: 100%; font-size: 0.93rem; }
+.tablewrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; margin: 14px 0; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 600; background: var(--surface-2); }
+tr:last-child td { border-bottom: 0; }
+td.n { white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+.stepper { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 12px 0 0; }
+.stepper button {
+  font: inherit; font-size: 0.92rem; padding: 6px 14px; border-radius: 8px; cursor: pointer;
+  background: var(--surface); color: var(--text); border: 1px solid var(--line);
+}
+.stepper button:hover:not(:disabled) { border-color: var(--text-2); }
+.stepper button:disabled { opacity: 0.45; cursor: default; }
+.stepper button.primary { background: var(--text); color: var(--bg); border-color: var(--text); }
+.stepper .count { font-size: 0.9rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.stepcap { margin: 10px 0 0; padding: 12px 16px; min-height: 76px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; max-width: none; }
+
+/* SVG styling */
+svg text { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; fill: var(--text); font-size: 13px; }
+svg .s { font-size: 11.5px; fill: var(--text-2); }
+svg .xs { font-size: 11px; fill: var(--text-2); }
+svg .b { font-weight: 650; }
+svg .h { font-size: 15px; font-weight: 700; }
+svg .mid { text-anchor: middle; }
+svg .end { text-anchor: end; }
+svg .c-lead { fill: var(--lead); }
+svg .c-fol { fill: var(--fol); }
+svg .c-cand { fill: var(--cand); }
+svg .c-cli { fill: var(--cli); }
+svg .c-dead { fill: var(--dead); }
+svg .c-muted { fill: var(--muted); }
+.box { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
+.box2 { fill: var(--surface-2); stroke: var(--line); stroke-width: 1.2; }
+.frame { fill: none; stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 6 5; }
+.lead { fill: var(--lead-bg); stroke: var(--lead); stroke-width: 2; }
+.fol { fill: var(--fol-bg); stroke: var(--fol); stroke-width: 1.6; }
+.cand { fill: var(--cand-bg); stroke: var(--cand); stroke-width: 2; }
+.cli { fill: var(--cli-bg); stroke: var(--cli); stroke-width: 1.6; }
+.dead { fill: var(--dead-bg); stroke: var(--dead); stroke-width: 1.6; stroke-dasharray: 5 4; }
+.disk { fill: var(--disk-bg); stroke: var(--disk); stroke-width: 1.4; }
+.ln { stroke: var(--text-2); stroke-width: 1.6; fill: none; }
+.ln-mute { stroke: var(--line); stroke-width: 1.4; fill: none; }
+.ln-lead { stroke: var(--lead); stroke-width: 2; fill: none; }
+.ln-fol { stroke: var(--fol); stroke-width: 1.8; fill: none; }
+.ln-cand { stroke: var(--cand); stroke-width: 2; fill: none; }
+.ln-cli { stroke: var(--cli); stroke-width: 1.8; fill: none; }
+.ln-dead { stroke: var(--dead); stroke-width: 1.6; fill: none; }
+.dash { stroke-dasharray: 5 4; }
+.life { stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 4 5; }
+.mk { fill: var(--text-2); }
+.mk-lead { fill: var(--lead); }
+.mk-fol { fill: var(--fol); }
+.mk-cand { fill: var(--cand); }
+.mk-cli { fill: var(--cli); }
+.mk-dead { fill: var(--dead); }
+.badge { fill: var(--text); }
+.badge-t { fill: var(--bg); font-size: 11px; font-weight: 700; text-anchor: middle; }
+.bar-ok { fill: var(--cli); opacity: 0.8; }
+.bar-slow { fill: var(--lead); opacity: 0.75; }
+.bar-gap { fill: var(--dead); }
+svg text.on-bar { fill: var(--bg); font-weight: 600; }
+.tbar-bg { fill: var(--surface-2); stroke: var(--line); }
+.tbar { fill: var(--muted); }
+.tbar.hot { fill: var(--cand); }
+
+/* step highlighting in the sequence diagram */
+#seq .st { transition: opacity .25s; }
+#seq.stepping .st { opacity: 0.13; }
+#seq.stepping .st.done { opacity: 0.55; }
+#seq.stepping .st.now { opacity: 1; }
+
+footer { margin-top: 64px; color: var(--muted); font-size: 0.88rem; border-top: 1px solid var(--line); padding-top: 16px; }
+@media (max-width: 600px) {
+  h1 { font-size: 1.7rem; }
+  h2 { font-size: 1.25rem; margin-top: 48px; }
+}
+</style>
+</head>
+<body>
+
+<!-- Shared arrowheads for every diagram on the page -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker>
+    <marker id="ah-lead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk-lead"/></marker>
+    <marker id="ah-fol" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk-fol"/></marker>
+    <marker id="ah-cand" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk-cand"/></marker>
+    <marker id="ah-cli" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk-cli"/></marker>
+    <marker id="ah-dead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk-dead"/></marker>
+  </defs>
+</svg>
+
+<main>
+<header>
+  <h1>How SentinelDB works</h1>
+  <p class="lede">A picture-by-picture walk through the real system: what is actually running on the machine, who gives orders to whom, how a SQL request travels in and how the answer comes back, how a new leader gets elected when one dies, and how the predictor hands over before that happens.</p>
+  <div class="legend" aria-label="Colour key">
+    <span class="chip"><span class="dot lead"></span>Leader</span>
+    <span class="chip"><span class="dot fol"></span>Follower</span>
+    <span class="chip"><span class="dot cand"></span>Candidate (asking for votes)</span>
+    <span class="chip"><span class="dot cli"></span>Client (you)</span>
+    <span class="chip"><span class="dot dead"></span>Crashed</span>
+    <span class="chip"><span class="dot disk"></span>Disk</span>
+  </div>
+  <nav class="toc" aria-label="Contents">
+    <ol>
+      <li><a href="#who">Who is actually running it?</a></li>
+      <li><a href="#setup">What is running on the machine</a></li>
+      <li><a href="#inside">Inside one node</a></li>
+      <li><a href="#command">Who commands whom</a></li>
+      <li><a href="#write">A write, from your keyboard and back</a></li>
+      <li><a href="#read">A read</a></li>
+      <li><a href="#roles">The three roles a node can be in</a></li>
+      <li><a href="#election">An election, step by step</a></li>
+      <li><a href="#safety">Why there can't be two leaders</a></li>
+      <li><a href="#predict">Handing over before the leader dies</a></li>
+      <li><a href="#numbers">All the timings in one place</a></li>
+    </ol>
+  </nav>
+</header>
+
+<!-- 1 -->
+<section id="who">
+  <h2><span class="num">1</span>Who is actually running it?</h2>
+  <p>The short answer: <strong>every node runs the whole algorithm for itself, and nobody is in charge of the nodes.</strong> There is no master program that decides who leads. The leader is whoever the nodes voted for most recently, and that can change at any moment.</p>
+  <div class="cards">
+    <div class="card fol">
+      <h4>Five copies of the same program</h4>
+      <p>Each node is its own <code>sentinel-node.exe</code> process with the same code. Each one has its own clock, its own timers, its own copy of the data on its own disk, and decides for itself when to start an election.</p>
+    </div>
+    <div class="card lead">
+      <h4>The leader is elected, not appointed</h4>
+      <p>One node at a time wins a majority vote. It is the only one that accepts writes and the only one that sends orders. If it goes quiet, the others notice on their own and elect someone else.</p>
+    </div>
+    <div class="card cli">
+      <h4><code>sentinel-lab</code> is only a launcher</h4>
+      <p>It starts the five processes with the right settings and stops them on Ctrl+C. In the web demo it also acts as a client and injects faults. It never votes, stores data or handles your SQL.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 2 -->
+<section id="setup">
+  <h2><span class="num">2</span>What is running on the machine</h2>
+  <p>When you run <code>bin\sentinel-lab serve</code>, this is what exists on your PC. In a real deployment, each of the five nodes would be on a different machine, and nothing else would change.</p>
+  <figure>
+    <div class="fig">
+    <svg viewBox="0 0 960 560" role="img" aria-label="Five node processes connected to each other, a launcher that starts them, and a CLI that talks to any of them">
+      <rect x="10" y="10" width="940" height="540" rx="14" class="frame"/>
+      <text x="30" y="38" class="b">Your PC</text>
+      <text x="96" y="38" class="s">(in production: five separate machines)</text>
+
+      <!-- peer mesh -->
+      <g class="ln-mute dash">
+        <line x1="620" y1="110" x2="801" y2="241"/><line x1="620" y1="110" x2="732" y2="454"/>
+        <line x1="620" y1="110" x2="508" y2="454"/><line x1="620" y1="110" x2="439" y2="241"/>
+        <line x1="801" y1="241" x2="732" y2="454"/><line x1="801" y1="241" x2="508" y2="454"/>
+        <line x1="801" y1="241" x2="439" y2="241"/><line x1="732" y1="454" x2="508" y2="454"/>
+        <line x1="732" y1="454" x2="439" y2="241"/><line x1="508" y1="454" x2="439" y2="241"/>
+      </g>
+      <rect x="540" y="282" width="160" height="44" rx="8" class="box"/>
+      <text x="620" y="300" class="s mid">every node talks to</text>
+      <text x="620" y="317" class="s mid">every other (mutual TLS)</text>
+
+      <!-- launcher -->
+      <rect x="30" y="60" width="250" height="124" rx="10" class="box"/>
+      <text x="46" y="86" class="b">sentinel-lab serve</text>
+      <text x="46" y="108" class="s">Starts the 5 node processes,</text>
+      <text x="46" y="126" class="s">prints their addresses, and stops</text>
+      <text x="46" y="144" class="s">them on Ctrl+C. Never votes,</text>
+      <text x="46" y="162" class="s">stores data or touches your SQL.</text>
+      <path d="M280,100 L533,104" class="ln dash" marker-end="url(#ah)"/>
+      <path d="M240,184 L380,197" class="ln dash" marker-end="url(#ah)"/>
+      <text x="292" y="92" class="xs">starts each node as its own OS process</text>
+
+      <!-- client -->
+      <rect x="30" y="300" width="250" height="124" rx="10" class="cli"/>
+      <text x="46" y="326" class="b">sentinel-cli (you)</text>
+      <text x="46" y="348" class="s">Knows all 5 client addresses.</text>
+      <text x="46" y="366" class="s">Sends SQL with a token over TLS</text>
+      <text x="46" y="384" class="s">to any node, and tries the next</text>
+      <text x="46" y="402" class="s">one if that node doesn't answer.</text>
+      <path d="M282,352 L352,272" class="ln-cli" marker-end="url(#ah-cli)"/>
+      <text x="300" y="296" class="xs c-cli">SQL</text>
+
+      <!-- nodes -->
+      <g>
+        <rect x="535" y="66" width="170" height="88" rx="10" class="fol"/>
+        <text x="551" y="90" class="b">n1 · follower</text>
+        <text x="551" y="108" class="s">sentinel-node.exe</text>
+        <text x="551" y="125" class="s">client :7101 · peer :7201</text>
+        <text x="551" y="142" class="s">disk: data\n1</text>
+      </g>
+      <g>
+        <rect x="716" y="197" width="170" height="88" rx="10" class="fol"/>
+        <text x="732" y="221" class="b">n2 · follower</text>
+        <text x="732" y="239" class="s">sentinel-node.exe</text>
+        <text x="732" y="256" class="s">client :7102 · peer :7202</text>
+        <text x="732" y="273" class="s">disk: data\n2</text>
+      </g>
+      <g>
+        <rect x="647" y="410" width="170" height="88" rx="10" class="lead"/>
+        <text x="663" y="434" class="b">n3 · leader</text>
+        <text x="663" y="452" class="s">sentinel-node.exe</text>
+        <text x="663" y="469" class="s">client :7103 · peer :7203</text>
+        <text x="663" y="486" class="s">disk: data\n3</text>
+      </g>
+      <g>
+        <rect x="423" y="410" width="170" height="88" rx="10" class="fol"/>
+        <text x="439" y="434" class="b">n4 · follower</text>
+        <text x="439" y="452" class="s">sentinel-node.exe</text>
+        <text x="439" y="469" class="s">client :7104 · peer :7204</text>
+        <text x="439" y="486" class="s">disk: data\n4</text>
+      </g>
+      <g>
+        <rect x="354" y="197" width="170" height="88" rx="10" class="fol"/>
+        <text x="370" y="221" class="b">n5 · follower</text>
+        <text x="370" y="239" class="s">sentinel-node.exe</text>
+        <text x="370" y="256" class="s">client :7105 · peer :7205</text>
+        <text x="370" y="273" class="s">disk: data\n5</text>
+      </g>
+      <text x="30" y="530" class="xs">Which node is the leader changes over time. n3 is just the leader at this moment.</text>
+    </svg>
+    </div>
+    <figcaption>Each node listens on two ports: one for clients like you, and one where only other nodes (holding a node certificate) may connect. The web demo builds the same picture, but picks free ports at random and deletes its data when it stops.</figcaption>
+  </figure>
+</section>
+
+<!-- 3 -->
+<section id="inside">
+  <h2><span class="num">3</span>Inside one node</h2>
+  <p>Every node runs the same parts. A single loop owns the Raft state and is the only code allowed to change it, so there are never two threads arguing about who the leader is inside one process.</p>
+  <figure>
+    <div class="fig">
+    <svg viewBox="0 0 960 600" role="img" aria-label="The parts inside one node process and how they connect">
+      <rect x="10" y="10" width="940" height="580" rx="14" class="frame"/>
+      <text x="30" y="38" class="b">One sentinel-node.exe process</text>
+      <text x="262" y="38" class="s">(all five nodes run exactly this)</text>
+
+      <!-- left column: client side -->
+      <rect x="30" y="62" width="280" height="58" rx="10" class="cli"/>
+      <text x="46" y="86" class="b">Client door  :7103</text>
+      <text x="46" y="106" class="s">TLS, and a token on every connection</text>
+
+      <rect x="30" y="144" width="280" height="88" rx="10" class="box"/>
+      <text x="46" y="168" class="b">Session (one per connection)</text>
+      <text x="46" y="188" class="s">Parses the SQL, checks the token allows it</text>
+      <text x="46" y="205" class="s">(read, write or admin). Not the leader?</text>
+      <text x="46" y="222" class="s">Forwards it to the leader instead.</text>
+
+      <rect x="30" y="256" width="280" height="110" rx="10" class="box"/>
+      <text x="46" y="280" class="b">SQL engine</text>
+      <text x="46" y="300" class="s">parser → relational algebra → executor</text>
+      <text x="46" y="318" class="s">Locks the rows it touches (two-phase</text>
+      <text x="46" y="336" class="s">locking). Turns a write into a list of</text>
+      <text x="46" y="354" class="s">row changes, called a Command.</text>
+
+      <rect x="30" y="470" width="280" height="80" rx="10" class="disk"/>
+      <text x="46" y="496" class="b">In-memory tables</text>
+      <text x="46" y="516" class="s">The database itself. Every node applies</text>
+      <text x="46" y="534" class="s">the same committed Commands, in order.</text>
+
+      <path d="M170,120 L170,142" class="ln" marker-end="url(#ah)"/>
+      <path d="M170,232 L170,254" class="ln" marker-end="url(#ah)"/>
+      <path d="M170,366 L170,468" class="ln" marker-end="url(#ah)" marker-start="url(#ah)"/>
+      <text x="162" y="422" class="xs end">reads rows</text>
+
+      <!-- middle column: consensus loop -->
+      <rect x="370" y="62" width="300" height="380" rx="12" class="lead" style="fill:var(--surface)"/>
+      <text x="388" y="88" class="b">Consensus loop</text>
+      <text x="388" y="107" class="s">one thread, the only code that touches Raft.</text>
+      <text x="388" y="124" class="s">Wakes on every 10 ms tick, and on every</text>
+      <text x="388" y="141" class="s">message, write or read that arrives.</text>
+
+      <rect x="390" y="158" width="260" height="104" rx="8" class="box2"/>
+      <text x="406" y="181" class="b">Raft state machine</text>
+      <text x="406" y="201" class="s">current term · who I voted for · my role</text>
+      <text x="406" y="219" class="s">the log · how far it is committed</text>
+      <text x="406" y="237" class="s">election timer · heartbeat timer</text>
+      <text x="406" y="254" class="xs c-muted">internal/raft/node.go</text>
+
+      <rect x="390" y="276" width="260" height="70" rx="8" class="box2"/>
+      <text x="406" y="299" class="b">Group commit</text>
+      <text x="406" y="319" class="s">packs up to 256 waiting writes into</text>
+      <text x="406" y="336" class="s">one log append and one disk sync</text>
+
+      <rect x="390" y="360" width="260" height="68" rx="8" class="lead"/>
+      <text x="406" y="383" class="b">Predictor (only while leader)</text>
+      <text x="406" y="402" class="s">every 100 ms: am I about to fail?</text>
+      <text x="406" y="419" class="s">If so, hand leadership to a follower.</text>
+
+      <path d="M310,310 L368,310" class="ln" marker-end="url(#ah)"/>
+      <text x="339" y="300" class="xs mid">Command</text>
+
+      <path d="M368,425 L298,466" class="ln" marker-end="url(#ah)"/>
+      <text x="300" y="434" class="xs end">apply when</text>
+      <text x="300" y="448" class="xs end">committed</text>
+
+      <rect x="370" y="470" width="300" height="80" rx="10" class="disk"/>
+      <text x="386" y="496" class="b">Write-ahead log + snapshots</text>
+      <text x="386" y="516" class="s">on disk (data\n3). Synced to disk before</text>
+      <text x="386" y="534" class="s">any message about it is sent.</text>
+      <path d="M520,442 L520,468" class="ln" marker-end="url(#ah)"/>
+
+      <!-- right column: peers -->
+      <rect x="720" y="62" width="210" height="96" rx="10" class="fol"/>
+      <text x="736" y="86" class="b">Peer door  :7203</text>
+      <text x="736" y="106" class="s">Mutual TLS. Only a process</text>
+      <text x="736" y="123" class="s">holding a node certificate</text>
+      <text x="736" y="140" class="s">can connect.</text>
+      <path d="M672,110 L718,110" class="ln" marker-end="url(#ah)" marker-start="url(#ah)"/>
+
+      <rect x="720" y="250" width="210" height="140" rx="10" class="box"/>
+      <text x="736" y="274" class="b">The other 4 nodes</text>
+      <text x="736" y="296" class="s">Messages both ways:</text>
+      <text x="736" y="314" class="s">· log entries and heartbeats</text>
+      <text x="736" y="332" class="s">· requests for votes, votes</text>
+      <text x="736" y="350" class="s">· replies</text>
+      <text x="736" y="368" class="s">· forwarded client SQL</text>
+      <path d="M825,158 L825,248" class="ln" marker-end="url(#ah)" marker-start="url(#ah)"/>
+      <text x="835" y="208" class="xs">network</text>
+    </svg>
+    </div>
+    <figcaption>The SQL engine never changes the tables directly. It hands a Command to the consensus loop and waits. Only when the Command is committed, meaning it's saved on a majority of disks, does each node apply it to its tables.</figcaption>
+  </figure>
+</section>
+
+<!-- 4 -->
+<section id="command">
+  <h2><span class="num">4</span>Who commands whom</h2>
+  <p>Orders flow one way: <strong>from the leader to the followers</strong>. Followers obey any leader whose term is at least as new as the one they know, and they only ever answer. They never give orders to anyone.</p>
+  <figure>
+    <div class="fig">
+    <svg viewBox="0 0 960 450" role="img" aria-label="The leader sends orders to four followers, which reply; a client's request reaching a follower is forwarded to the leader">
+      <rect x="400" y="36" width="170" height="72" rx="10" class="lead"/>
+      <text x="485" y="66" class="b mid">n3 · leader</text>
+      <text x="485" y="86" class="s mid">term 5</text>
+      <text x="590" y="58" class="s c-lead b">Sends orders (AppendEntries)</text>
+      <text x="590" y="76" class="s">every 50 ms, even when there is</text>
+      <text x="590" y="93" class="s">nothing new, as a heartbeat</text>
+
+      <!-- orders -->
+      <path d="M470,108 L140,246" class="ln-lead" marker-end="url(#ah-lead)"/>
+      <path d="M478,108 L370,246" class="ln-lead" marker-end="url(#ah-lead)"/>
+      <path d="M492,108 L600,246" class="ln-lead" marker-end="url(#ah-lead)"/>
+      <path d="M500,108 L830,246" class="ln-lead" marker-end="url(#ah-lead)"/>
+      <!-- replies -->
+      <path d="M170,248 L478,112" class="ln-fol dash" marker-end="url(#ah-fol)"/>
+      <path d="M395,248 L484,112" class="ln-fol dash" marker-end="url(#ah-fol)"/>
+      <path d="M575,248 L488,112" class="ln-fol dash" marker-end="url(#ah-fol)"/>
+      <path d="M800,248 L494,112" class="ln-fol dash" marker-end="url(#ah-fol)"/>
+
+      <rect x="60" y="250" width="160" height="62" rx="10" class="fol"/>
+      <text x="140" y="276" class="b mid">n1</text><text x="140" y="296" class="s mid">follower · term 5</text>
+      <rect x="290" y="250" width="160" height="62" rx="10" class="fol"/>
+      <text x="370" y="276" class="b mid">n2</text><text x="370" y="296" class="s mid">follower · term 5</text>
+      <rect x="520" y="250" width="160" height="62" rx="10" class="fol"/>
+      <text x="600" y="276" class="b mid">n4</text><text x="600" y="296" class="s mid">follower · term 5</text>
+      <rect x="750" y="250" width="160" height="62" rx="10" class="fol"/>
+      <text x="830" y="276" class="b mid">n5</text><text x="830" y="296" class="s mid">follower · term 5</text>
+
+      <!-- client and forwarding -->
+      <rect x="270" y="364" width="200" height="50" rx="10" class="cli"/>
+      <text x="370" y="394" class="b mid">sentinel-cli</text>
+      <path d="M370,362 L370,316" class="ln-cli" marker-end="url(#ah-cli)"/>
+      <text x="380" y="346" class="xs c-cli">your SQL</text>
+      <path d="M296,250 C230,170 300,80 396,64" class="ln-cli dash" marker-end="url(#ah-cli)"/>
+      <text x="40" y="128" class="s c-cli b">n2 forwards it</text>
+      <text x="40" y="145" class="s">to the leader, and</text>
+      <text x="40" y="162" class="s">passes the answer back</text>
+
+      <text x="30" y="440" class="xs">Solid orange: orders from the leader. Dashed blue: replies (“I have everything up to entry #1043”, or “my log doesn't match there, go back”).</text>
+    </svg>
+    </div>
+    <figcaption>The leader's authority isn't permanent. It is leader only for one numbered <em>term</em>. If it can't reach a majority for 500 ms, it steps down on its own. If any node shows it a higher term, it steps down at once.</figcaption>
+  </figure>
+
+  <h3>Every message the nodes send each other</h3>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Message</th><th>From → to</th><th>What it says</th></tr></thead>
+    <tbody>
+      <tr><td><strong>AppendEntries</strong></td><td>leader → each follower</td><td>“I'm the leader of term T. Here are the next log entries (maybe none, which makes it a heartbeat), and here is how far the log is committed.”</td></tr>
+      <tr><td><strong>AppendEntries reply</strong></td><td>follower → leader</td><td>“I now have everything up to entry #N”, or “my entry before that doesn't match yours, send from earlier.”</td></tr>
+      <tr><td><strong>RequestVote</strong></td><td>candidate → everyone</td><td>“Make me leader of term T. My log ends at entry #N, from term T′.”</td></tr>
+      <tr><td><strong>Vote reply</strong></td><td>everyone → candidate</td><td>Yes or no.</td></tr>
+      <tr><td><strong>Snapshot</strong></td><td>leader → a follower far behind</td><td>The whole database as of entry #N, sent when the entries it's missing have already been trimmed from the log.</td></tr>
+      <tr><td><strong>TimeoutNow</strong></td><td>leader → one chosen follower</td><td>“Start an election right now.” Used only to hand over leadership on purpose.</td></tr>
+      <tr><td><strong>Forwarded request</strong></td><td>follower → leader</td><td>A client's SQL statement that the follower isn't allowed to run itself.</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<!-- 5 -->
+<section id="write">
+  <h2><span class="num">5</span>A write, from your keyboard and back</h2>
+  <p>Say you type <code>UPDATE accounts SET balance_cents = 500 WHERE id = 1;</code> and your CLI happens to be connected to n2, a follower. Press <strong>Next</strong> to follow it one step at a time.</p>
+  <figure>
+    <div class="fig">
+    <svg id="seq" viewBox="0 0 960 640" role="img" aria-label="Sequence diagram of a write travelling from the client through a follower to the leader, to disk, to the followers, and back">
+      <!-- headers -->
+      <rect x="20" y="20" width="140" height="50" rx="10" class="cli"/>
+      <text x="90" y="50" class="b mid">You (CLI)</text>
+      <rect x="190" y="20" width="150" height="50" rx="10" class="fol"/>
+      <text x="265" y="41" class="b mid">n2</text><text x="265" y="59" class="xs mid">follower you reached</text>
+      <rect x="380" y="20" width="150" height="50" rx="10" class="lead"/>
+      <text x="455" y="41" class="b mid">n3</text><text x="455" y="59" class="xs mid">leader</text>
+      <rect x="555" y="20" width="110" height="50" rx="10" class="disk"/>
+      <text x="610" y="41" class="b mid">n3's disk</text><text x="610" y="59" class="xs mid">log</text>
+      <rect x="720" y="20" width="220" height="50" rx="10" class="fol"/>
+      <text x="830" y="41" class="b mid">all followers</text><text x="830" y="59" class="xs mid">n1 n2 n4 n5, each with its own disk</text>
+      <!-- lifelines -->
+      <line x1="90" y1="70" x2="90" y2="625" class="life"/>
+      <line x1="265" y1="70" x2="265" y2="625" class="life"/>
+      <line x1="455" y1="70" x2="455" y2="625" class="life"/>
+      <line x1="610" y1="70" x2="610" y2="625" class="life"/>
+      <line x1="830" y1="70" x2="830" y2="625" class="life"/>
+
+      <g class="st" data-s="1">
+        <path d="M90,110 L262,110" class="ln-cli" marker-end="url(#ah-cli)"/>
+        <text x="176" y="102" class="xs mid">UPDATE … (request id r-42)</text>
+        <circle cx="30" cy="110" r="10" class="badge"/><text x="30" y="114" class="badge-t">1</text>
+      </g>
+      <g class="st" data-s="2">
+        <rect x="175" y="126" width="180" height="40" rx="6" class="box"/>
+        <text x="265" y="143" class="xs mid">parse SQL · token allows writes</text>
+        <text x="265" y="158" class="xs mid">I'm not the leader → forward</text>
+        <path d="M265,180 L452,180" class="ln-cli dash" marker-end="url(#ah-cli)"/>
+        <text x="360" y="174" class="xs mid">forward over the peer link</text>
+        <circle cx="30" cy="150" r="10" class="badge"/><text x="30" y="154" class="badge-t">2</text>
+      </g>
+      <g class="st" data-s="3">
+        <rect x="340" y="196" width="230" height="56" rx="6" class="lead"/>
+        <text x="455" y="214" class="xs mid">wait until I'm fully caught up as leader</text>
+        <text x="455" y="229" class="xs mid">lock row accounts.id=1 (2PL)</text>
+        <text x="455" y="244" class="xs mid">work out the change → a Command</text>
+        <circle cx="30" cy="224" r="10" class="badge"/><text x="30" y="228" class="badge-t">3</text>
+      </g>
+      <g class="st" data-s="4">
+        <path d="M455,276 L607,276" class="ln" marker-end="url(#ah)"/>
+        <text x="532" y="268" class="xs mid">append entry #1043, sync</text>
+        <circle cx="30" cy="276" r="10" class="badge"/><text x="30" y="280" class="badge-t">4</text>
+      </g>
+      <g class="st" data-s="5">
+        <path d="M455,310 L827,310" class="ln-lead" marker-end="url(#ah-lead)"/>
+        <text x="700" y="302" class="xs mid">AppendEntries: entry #1043, term 5</text>
+        <circle cx="30" cy="310" r="10" class="badge"/><text x="30" y="314" class="badge-t">5</text>
+      </g>
+      <g class="st" data-s="6">
+        <rect x="725" y="326" width="210" height="40" rx="6" class="fol"/>
+        <text x="830" y="343" class="xs mid">does my entry #1042 match yours?</text>
+        <text x="830" y="358" class="xs mid">yes → append #1043, sync to disk</text>
+        <path d="M830,388 L458,388" class="ln-fol dash" marker-end="url(#ah-fol)"/>
+        <text x="650" y="380" class="xs mid">“I have everything up to #1043”</text>
+        <circle cx="30" cy="370" r="10" class="badge"/><text x="30" y="374" class="badge-t">6</text>
+      </g>
+      <g class="st" data-s="7">
+        <rect x="340" y="404" width="230" height="40" rx="6" class="lead"/>
+        <text x="455" y="421" class="xs mid">me + 2 followers = 3 of 5 have it</text>
+        <text x="455" y="436" class="xs mid">→ entry #1043 is committed</text>
+        <circle cx="30" cy="424" r="10" class="badge"/><text x="30" y="428" class="badge-t">7</text>
+      </g>
+      <g class="st" data-s="8">
+        <rect x="340" y="456" width="230" height="40" rx="6" class="lead"/>
+        <text x="455" y="473" class="xs mid">apply it to my in-memory tables</text>
+        <text x="455" y="488" class="xs mid">release the row lock</text>
+        <circle cx="30" cy="476" r="10" class="badge"/><text x="30" y="480" class="badge-t">8</text>
+      </g>
+      <g class="st" data-s="9">
+        <path d="M455,520 L268,520" class="ln-cli" marker-end="url(#ah-cli)"/>
+        <text x="360" y="512" class="xs mid">OK, 1 row</text>
+        <path d="M265,546 L93,546" class="ln-cli" marker-end="url(#ah-cli)"/>
+        <text x="176" y="538" class="xs mid">OK, 1 row</text>
+        <circle cx="30" cy="533" r="10" class="badge"/><text x="30" y="537" class="badge-t">9</text>
+      </g>
+      <g class="st" data-s="10">
+        <path d="M455,590 L827,590" class="ln-lead dash" marker-end="url(#ah-lead)"/>
+        <text x="640" y="582" class="xs mid">next heartbeat: “committed up to #1043”</text>
+        <text x="830" y="612" class="xs mid">followers apply #1043 too</text>
+        <circle cx="30" cy="590" r="10" class="badge"/><text x="30" y="594" class="badge-t">10</text>
+      </g>
+    </svg>
+    </div>
+  </figure>
+  <div class="stepper" data-for="seq">
+    <button type="button" data-act="prev">← Prev</button>
+    <button type="button" data-act="next" class="primary">Next →</button>
+    <button type="button" data-act="all">Show all</button>
+    <span class="count" aria-live="polite"></span>
+  </div>
+  <p class="stepcap" id="seq-cap" aria-live="polite"></p>
+
+  <div class="callout">
+    <strong>Why the request ID matters.</strong> If the leader dies between step 7 and step 9, you never see “OK”, but the write may already be committed. The CLI retries on another node with the <em>same</em> request ID, <code>r-42</code>. The database remembers IDs it has already applied, so it reports success without applying the write a second time.
+  </div>
+</section>
+
+<!-- 6 -->
+<section id="read">
+  <h2><span class="num">6</span>A read</h2>
+  <p>A <code>SELECT</code> doesn't need to go into the log, but the leader can't simply answer from memory either. It might have been replaced a moment ago without knowing it yet, and then it would return old data. So it checks first. This check is Raft's <em>ReadIndex</em>.</p>
+  <figure>
+    <div class="fig">
+    <svg viewBox="0 0 960 190" role="img" aria-label="Five steps of a read on the leader">
+      <g>
+        <rect x="16" y="40" width="166" height="104" rx="10" class="cli"/>
+        <text x="99" y="66" class="b mid">1 · SELECT arrives</text>
+        <text x="99" y="88" class="s mid">at the leader (or is</text>
+        <text x="99" y="105" class="s mid">forwarded to it, as</text>
+        <text x="99" y="122" class="s mid">with writes)</text>
+      </g>
+      <path d="M182,92 L202,92" class="ln" marker-end="url(#ah)"/>
+      <g>
+        <rect x="204" y="40" width="166" height="104" rx="10" class="lead"/>
+        <text x="287" y="66" class="b mid">2 · Note the point</text>
+        <text x="287" y="88" class="s mid">“the log is committed</text>
+        <text x="287" y="105" class="s mid">up to #1043 right now”</text>
+      </g>
+      <path d="M370,92 L390,92" class="ln" marker-end="url(#ah)"/>
+      <g>
+        <rect x="392" y="40" width="166" height="104" rx="10" class="lead"/>
+        <text x="475" y="66" class="b mid">3 · Am I still leader?</text>
+        <text x="475" y="88" class="s mid">wait for one heartbeat</text>
+        <text x="475" y="105" class="s mid">round to be answered</text>
+        <text x="475" y="122" class="s mid">by a majority</text>
+      </g>
+      <path d="M558,92 L578,92" class="ln" marker-end="url(#ah)"/>
+      <g>
+        <rect x="580" y="40" width="166" height="104" rx="10" class="lead"/>
+        <text x="663" y="66" class="b mid">4 · Catch up</text>
+        <text x="663" y="88" class="s mid">wait until entries up</text>
+        <text x="663" y="105" class="s mid">to #1043 are applied</text>
+        <text x="663" y="122" class="s mid">to my tables</text>
+      </g>
+      <path d="M746,92 L766,92" class="ln" marker-end="url(#ah)"/>
+      <g>
+        <rect x="768" y="40" width="176" height="104" rx="10" class="cli"/>
+        <text x="856" y="66" class="b mid">5 · Run the query</text>
+        <text x="856" y="88" class="s mid">on the in-memory</text>
+        <text x="856" y="105" class="s mid">tables and send the</text>
+        <text x="856" y="122" class="s mid">rows back</text>
+      </g>
+      <text x="16" y="176" class="xs">If a majority doesn't answer in step 3, the read fails with “not leader”, and the CLI tries again elsewhere. Nothing stale is ever returned by default.</text>
+    </svg>
+    </div>
+    <figcaption>A client can also ask for a <em>stale read</em>, which a follower answers from its own copy straight away. It's faster, but may be slightly behind. It's never the default.</figcaption>
+  </figure>
+</section>
+
+<!-- 7 -->
+<section id="roles">
+  <h2><span class="num">7</span>The three roles a node can be in</h2>
+  <p>Every node is always in exactly one of three roles. All five start as followers. What moves a node from one role to another is only what it sees itself: its own timer, and the messages it receives.</p>
+  <figure>
+    <div class="fig">
+    <svg viewBox="0 0 960 330" role="img" aria-label="State machine: follower, candidate and leader, and the events that move a node between them">
+      <path d="M24,170 L76,170" class="ln" marker-end="url(#ah)"/>
+      <text x="24" y="160" class="xs">start</text>
+
+      <rect x="80" y="130" width="200" height="80" rx="40" class="fol"/>
+      <text x="180" y="166" class="h mid">Follower</text>
+      <text x="180" y="186" class="xs mid">obeys the leader, votes</text>
+
+      <rect x="380" y="130" width="200" height="80" rx="40" class="cand"/>
+      <text x="480" y="166" class="h mid">Candidate</text>
+      <text x="480" y="186" class="xs mid">asks everyone for votes</text>
+
+      <rect x="680" y="130" width="200" height="80" rx="40" class="lead"/>
+      <text x="780" y="166" class="h mid">Leader</text>
+      <text x="780" y="186" class="xs mid">takes writes, gives orders</text>
+
+      <!-- follower to candidate -->
+      <path d="M280,152 L378,152" class="ln-cand" marker-end="url(#ah-cand)"/>
+      <text x="330" y="106" class="xs mid">no heartbeat for</text>
+      <text x="330" y="120" class="xs mid">500–1000 ms (random),</text>
+      <text x="330" y="134" class="xs mid">or told “TimeoutNow”</text>
+      <!-- candidate to leader -->
+      <path d="M580,152 L678,152" class="ln-lead" marker-end="url(#ah-lead)"/>
+      <text x="630" y="120" class="xs mid">votes from a</text>
+      <text x="630" y="134" class="xs mid">majority (3 of 5)</text>
+      <!-- candidate to follower -->
+      <path d="M380,190 L282,190" class="ln-fol" marker-end="url(#ah-fol)"/>
+      <text x="330" y="212" class="xs mid">hears from a leader</text>
+      <text x="330" y="226" class="xs mid">of this term or newer</text>
+      <!-- candidate self loop -->
+      <path d="M455,130 C430,50 530,50 505,128" class="ln-cand" marker-end="url(#ah-cand)"/>
+      <text x="480" y="44" class="xs mid">split vote: its timer runs out again → next term, ask again</text>
+      <!-- leader to follower -->
+      <path d="M780,212 C780,300 180,300 180,214" class="ln-fol" marker-end="url(#ah-fol)"/>
+      <text x="480" y="306" class="xs mid">sees a higher term, or a majority hasn't answered for 500 ms → steps down</text>
+    </svg>
+    </div>
+    <figcaption>The random part of the timeout is what makes elections settle quickly. One node's timer almost always runs out first, so it usually collects its votes before anyone else has even started.</figcaption>
+  </figure>
+  <p>Some rules decide when a node gives its vote. A node votes <strong>yes</strong> only if all of these are true:</p>
+  <ul>
+    <li>It hasn't already voted for someone else in this term. It writes its vote to disk <em>before</em> replying, so a restart can't make it forget.</li>
+    <li>The candidate's log is at least as up to date as its own: the last entry has a later term, or the same term and the log is at least as long.</li>
+    <li>It hasn't heard from a working leader within the last election timeout. This is called <em>leader stickiness</em>. It stops one flaky node from repeatedly removing a healthy leader. A planned handover is the one exception.</li>
+  </ul>
+</section>
+
+<!-- 8 -->
+<section id="election">
+  <h2><span class="num">8</span>An election, step by step</h2>
+  <p>This follows what happens when the leader, n3, is killed (the <strong>Kill the leader now</strong> button in the demo). Nobody tells the other nodes. They work it out from the silence.</p>
+  <figure>
+    <div class="fig">
+    <svg id="elect" viewBox="0 0 960 480" role="img" aria-label="Five nodes in a ring, showing the election in the current step">
+      <g id="elect-arrows"></g>
+      <g id="elect-nodes"></g>
+      <text id="elect-clock" x="24" y="34" class="b"></text>
+      <text x="24" y="54" class="xs">bar under each node = its election timer</text>
+    </svg>
+    </div>
+  </figure>
+  <div class="stepper" data-for="elect">
+    <button type="button" data-act="prev">← Prev</button>
+    <button type="button" data-act="next" class="primary">Next →</button>
+    <span class="count" aria-live="polite"></span>
+  </div>
+  <p class="stepcap" id="elect-cap" aria-live="polite"></p>
+  <p>In the real cluster, all of this takes roughly as long as the shortest random timer: between 0.5 and 1 second. That's the gap you see on the demo's latency chart under <strong>Plain Raft</strong>.</p>
+</section>
+
+<!-- 9 -->
+<section id="safety">
+  <h2><span class="num">9</span>Why there can't be two leaders in one term</h2>
+  <p>It comes down to simple counting. Winning needs 3 votes out of 5. Any two groups of 3 out of 5 must share at least one node, and that node votes only once per term.</p>
+  <figure>
+    <div class="fig">
+    <svg viewBox="0 0 960 270" role="img" aria-label="Two groups of three nodes out of five always share at least one node">
+      <path d="M248,86 L248,72 L512,72 L512,86" class="ln-cand"/>
+      <text x="380" y="60" class="s mid c-cand b">the 3 votes that made n2 leader of term 5</text>
+      <circle cx="280" cy="125" r="30" class="lead"/><text x="280" y="130" class="b mid">n2</text>
+      <circle cx="380" cy="125" r="30" class="fol"/><text x="380" y="130" class="b mid">n1</text>
+      <circle cx="480" cy="125" r="34" class="cand"/><text x="480" y="130" class="b mid">n5</text>
+      <circle cx="580" cy="125" r="30" class="fol"/><text x="580" y="130" class="b mid">n4</text>
+      <circle cx="680" cy="125" r="30" class="dead"/><text x="680" y="130" class="b mid">n3</text>
+      <path d="M448,164 L448,178 L712,178 L712,164" class="ln-dead dash"/>
+      <text x="580" y="198" class="s mid c-dead b">the 3 votes any rival would need in term 5</text>
+      <text x="480" y="232" class="s mid">n5 is in both groups. It can vote only once in term 5, and it saves that vote</text>
+      <text x="480" y="250" class="s mid">to disk before answering, so a second winner in term 5 is impossible.</text>
+    </svg>
+    </div>
+  </figure>
+  <p>The same counting keeps committed data safe. An entry counts as committed only once it's on a majority of disks. A candidate needs a majority of votes, and voters refuse a candidate whose log is behind theirs. So any new leader already has every committed entry.</p>
+  <div class="callout">
+    <strong>One subtlety.</strong> Two nodes <em>can</em> both believe they are leader at the same moment, but only in <em>different</em> terms. A cut-off old leader may not have heard the news yet. It's harmless: it can't commit anything, because a majority has moved on to the newer term and will turn it down. The project's model checker explores millions of possible orderings of events and finds no case of two leaders in the same term.
+  </div>
+</section>
+
+<!-- 10 -->
+<section id="predict">
+  <h2><span class="num">10</span>Handing over before the leader dies</h2>
+  <p>Plain Raft only reacts once the leader has gone silent for 0.5–1 s. SentinelDB's leader also watches how its own heartbeats are doing. When its links to the followers are getting worse, it gives leadership away while it can still do so cleanly.</p>
+  <figure>
+    <div class="fig">
+    <svg viewBox="0 0 960 240" role="img" aria-label="The six stages of the failure predictor inside the leader">
+      <rect x="10" y="10" width="940" height="220" rx="14" class="frame"/>
+      <text x="30" y="40" class="b c-lead">Runs inside the leader's process only, in the consensus loop</text>
+      <g>
+        <rect x="26" y="66" width="138" height="120" rx="10" class="box"/>
+        <text x="95" y="90" class="b mid">Heartbeats</text>
+        <text x="95" y="112" class="xs mid">to every follower</text>
+        <text x="95" y="128" class="xs mid">every 50 ms; each</text>
+        <text x="95" y="144" class="xs mid">reply is timed</text>
+      </g>
+      <path d="M164,126 L178,126" class="ln" marker-end="url(#ah)"/>
+      <g>
+        <rect x="180" y="66" width="138" height="120" rx="10" class="box"/>
+        <text x="249" y="90" class="b mid">Last 2 seconds</text>
+        <text x="249" y="112" class="xs mid">round-trip times</text>
+        <text x="249" y="128" class="xs mid">per follower, plus</text>
+        <text x="249" y="144" class="xs mid">replies that never</text>
+        <text x="249" y="160" class="xs mid">came</text>
+      </g>
+      <path d="M318,126 L332,126" class="ln" marker-end="url(#ah)"/>
+      <g>
+        <rect x="334" y="66" width="138" height="120" rx="10" class="box"/>
+        <text x="403" y="90" class="b mid">6 numbers</text>
+        <text x="403" y="112" class="xs mid">average, last 0.5 s,</text>
+        <text x="403" y="128" class="xs mid">jitter, worst, trend,</text>
+        <text x="403" y="144" class="xs mid">missed replies</text>
+      </g>
+      <path d="M472,126 L486,126" class="ln" marker-end="url(#ah)"/>
+      <g>
+        <rect x="488" y="66" width="138" height="120" rx="10" class="cand"/>
+        <text x="557" y="90" class="b mid">Random forest</text>
+        <text x="557" y="112" class="xs mid">trained in Python,</text>
+        <text x="557" y="128" class="xs mid">runs as plain Go</text>
+        <text x="557" y="144" class="xs mid">→ chance of failing</text>
+      </g>
+      <path d="M626,126 L640,126" class="ln" marker-end="url(#ah)"/>
+      <g>
+        <rect x="642" y="66" width="138" height="120" rx="10" class="box"/>
+        <text x="711" y="90" class="b mid">Sure enough?</text>
+        <text x="711" y="112" class="xs mid">checked every 100 ms;</text>
+        <text x="711" y="128" class="xs mid">≥ 0.75 for 10 checks</text>
+        <text x="711" y="144" class="xs mid">in a row (~1 s)</text>
+      </g>
+      <path d="M780,126 L794,126" class="ln" marker-end="url(#ah)"/>
+      <g>
+        <rect x="796" y="66" width="140" height="120" rx="10" class="lead"/>
+        <text x="866" y="90" class="b mid">Hand over</text>
+        <text x="866" y="112" class="xs mid">to the follower that is</text>
+        <text x="866" y="128" class="xs mid">fully caught up and</text>
+        <text x="866" y="144" class="xs mid">answers fastest</text>
+      </g>
+      <text x="30" y="214" class="xs">Doesn't act in its first 2.5 s as leader (not enough history yet), or within 5 s of its last handover.</text>
+    </svg>
+    </div>
+  </figure>
+
+  <h3>How the handover itself works</h3>
+  <ol>
+    <li>The leader stops accepting new writes, so the target can catch up.</li>
+    <li>It sends the target any entries it's missing.</li>
+    <li>Once the target has the whole log, the leader sends it <strong>TimeoutNow</strong>.</li>
+    <li>The target starts an election straight away, without waiting out its timer. The others vote in the normal way, and leader stickiness doesn't block this vote, because it was asked for on purpose.</li>
+    <li>If none of this finishes within one election timeout, the handover is dropped and the old leader carries on.</li>
+  </ol>
+  <div class="callout">
+    <strong>Why a wrong prediction can't break anything.</strong> The predictor can only <em>ask</em> for a handover. The handover goes through the normal vote, with the same rules as any election. So the worst a false alarm can do is cause one unnecessary handover of about 0.2 s. It can never create two leaders or lose data.
+  </div>
+
+  <figure>
+    <div class="fig">
+    <svg viewBox="0 0 960 270" role="img" aria-label="Timeline comparing plain Raft with prediction when the leader degrades and then dies">
+      <text x="20" y="84" class="b">Plain Raft</text>
+      <text x="20" y="164" class="b">With prediction</text>
+
+      <!-- plain raft row -->
+      <rect x="150" y="66" width="78" height="30" class="bar-ok"/>
+      <rect x="228" y="66" width="624" height="30" class="bar-slow"/>
+      <rect x="852" y="60" width="69" height="42" class="bar-gap"/>
+      <rect x="921" y="66" width="9" height="30" class="bar-ok"/>
+      <text x="540" y="86" class="xs mid on-bar">leader getting slower: writes slow down too</text>
+      <text x="886" y="52" class="xs mid c-dead b">~0.9 s no writes</text>
+      <text x="852" y="122" class="xs mid c-dead">leader dies</text>
+
+      <!-- prediction row -->
+      <rect x="150" y="146" width="78" height="30" class="bar-ok"/>
+      <rect x="228" y="146" width="265" height="30" class="bar-slow"/>
+      <rect x="493" y="140" width="16" height="42" class="bar-gap"/>
+      <rect x="509" y="146" width="421" height="30" class="bar-ok"/>
+      <text x="501" y="132" class="xs mid c-dead b">handover ~0.2 s</text>
+      <text x="720" y="166" class="xs mid on-bar">new leader is healthy: writes are fast again</text>
+      <path d="M852,186 L852,196" class="ln-dead"/>
+      <text x="852" y="208" class="xs mid c-dead">old node dies; it's only a follower now</text>
+
+      <!-- axis -->
+      <line x1="150" y1="232" x2="930" y2="232" class="ln-mute"/>
+      <g class="xs">
+        <text x="150" y="250" class="xs mid">0 s</text><text x="306" y="250" class="xs mid">2 s</text>
+        <text x="462" y="250" class="xs mid">4 s</text><text x="618" y="250" class="xs mid">6 s</text>
+        <text x="774" y="250" class="xs mid">8 s</text><text x="930" y="250" class="xs mid">10 s</text>
+      </g>
+      <text x="20" y="250" class="xs">time →</text>
+    </svg>
+    </div>
+    <figcaption>Illustrative timeline using the measured medians for the “growing delay” fault: 890 ms with no completed write under plain Raft, against 202 ms with prediction. Across all gradual faults, the handover came a median of 4.6 s before the node died. A <em>sudden</em> kill gives no warning, so prediction can't help there, and both modes behave the same.</figcaption>
+  </figure>
+</section>
+
+<!-- 11 -->
+<section id="numbers">
+  <h2><span class="num">11</span>All the timings in one place</h2>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>What</th><th>Value</th><th>Where it's set</th></tr></thead>
+    <tbody>
+      <tr><td>One tick of the consensus loop's clock</td><td class="n">10 ms</td><td><code>-tick</code></td></tr>
+      <tr><td>Leader's heartbeat to every follower</td><td class="n">every 5 ticks = 50 ms</td><td><code>-heartbeat-ticks</code></td></tr>
+      <tr><td>Follower's election timeout</td><td class="n">50 ticks + random 0–50 = 500–1000 ms</td><td><code>-election-ticks</code></td></tr>
+      <tr><td>Leader steps down if a majority is silent for</td><td class="n">500 ms</td><td>same setting</td></tr>
+      <tr><td>Votes needed to win, and copies needed to commit</td><td class="n">3 of 5</td><td>cluster size</td></tr>
+      <tr><td>Writes packed into one disk sync</td><td class="n">up to 256</td><td>fixed</td></tr>
+      <tr><td>Log trimmed into a snapshot after</td><td class="n">10,000 entries</td><td><code>-snapshot-every</code></td></tr>
+      <tr><td>Predictor: how often it checks / history it looks at</td><td class="n">100 ms / last 2 s</td><td>fixed</td></tr>
+      <tr><td>Predictor: how sure, and for how long</td><td class="n">≥ 0.75, 10 checks in a row</td><td>model file</td></tr>
+      <tr><td>Predictor: quiet period after becoming leader / after a handover</td><td class="n">2.5 s / 5 s</td><td>fixed</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Where each part lives in the code</h3>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Part</th><th>Folder</th></tr></thead>
+    <tbody>
+      <tr><td>Starting a node (flags, certificates, ports)</td><td><code>cmd/sentinel-node</code></td></tr>
+      <tr><td>The consensus loop, sessions, forwarding</td><td><code>internal/server</code></td></tr>
+      <tr><td>Raft itself: elections, log, commit, handover</td><td><code>internal/raft</code></td></tr>
+      <tr><td>Write-ahead log and snapshots on disk</td><td><code>internal/wal</code></td></tr>
+      <tr><td>SQL parsing and relational algebra</td><td><code>internal/sql</code></td></tr>
+      <tr><td>Tables, executor, Commands</td><td><code>internal/engine</code></td></tr>
+      <tr><td>Two-phase locking</td><td><code>internal/txn</code></td></tr>
+      <tr><td>TLS, tokens, peer connections, fault injection</td><td><code>internal/transport</code></td></tr>
+      <tr><td>The predictor</td><td><code>internal/predict</code></td></tr>
+      <tr><td>The CLI's retries and request IDs</td><td><code>internal/client</code></td></tr>
+      <tr><td>Launcher, demo and experiments</td><td><code>cmd/sentinel-lab</code>, <code>internal/lab</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<footer>SentinelDB · how it works. The numbers come from <code>results/evaluation.md</code>; the timings from the code defaults.</footer>
+</main>
+
+<script>
+(function () {
+  // ---------- Sequence diagram stepper ----------
+  var seqCaps = [
+    "The whole journey of one write. Press <strong>Next</strong> to go through it step by step.",
+    "<strong>1.</strong> The CLI sends your statement to whichever node it's connected to, here n2. It attaches a random <strong>request ID</strong>, so the same write can be recognised if it ever has to be retried.",
+    "<strong>2.</strong> n2 parses the SQL and checks your token is allowed to write. n2 is a follower, so it can't run writes. It <strong>forwards</strong> the statement to n3, the leader it knows of, over the node-to-node connection.",
+    "<strong>3.</strong> The leader first makes sure it's fully caught up on everything earlier leaders committed. Then it <strong>locks</strong> the row it's changing, so no other transaction can interfere, and works out exactly which rows change. That list is the <strong>Command</strong>.",
+    "<strong>4.</strong> The Command becomes entry #1043 in the leader's log, and is <strong>synced to disk</strong> before anything else happens. If other writes are waiting, they share the same disk sync (group commit).",
+    "<strong>5.</strong> The leader sends the new entry to <strong>every follower</strong> in an AppendEntries message, along with the number and term of the entry just before it.",
+    "<strong>6.</strong> Each follower checks that its entry #1042 matches the leader's. If it does, the follower appends #1043, <strong>syncs it to its own disk</strong>, and replies. If not, it says so, and the leader resends from earlier until they agree.",
+    "<strong>7.</strong> As soon as the leader plus two followers have it, which is <strong>3 of 5</strong>, the entry is <strong>committed</strong>. From now on it survives any two machines failing, and every future leader will have it.",
+    "<strong>8.</strong> The leader applies the Command to its in-memory tables, which is when the change actually happens, and releases the lock.",
+    "<strong>9.</strong> “OK, 1 row” goes back through n2 to you. You only get this <em>after</em> the write is on a majority of disks.",
+    "<strong>10.</strong> The next heartbeat tells the followers that entry #1043 is committed, and each applies it to its own copy of the tables. All five copies end up identical."
+  ];
+  var seq = document.getElementById("seq");
+  var seqGroups = seq.querySelectorAll(".st");
+  var seqStep = 0;
+  var seqBar = document.querySelector('.stepper[data-for="seq"]');
+  function renderSeq() {
+    if (seqStep === 0) seq.classList.remove("stepping"); else seq.classList.add("stepping");
+    seqGroups.forEach(function (g) {
+      var s = +g.getAttribute("data-s");
+      g.classList.toggle("done", s < seqStep);
+      g.classList.toggle("now", s === seqStep);
+    });
+    document.getElementById("seq-cap").innerHTML = seqCaps[seqStep];
+    seqBar.querySelector(".count").textContent = seqStep === 0 ? "Overview" : "Step " + seqStep + " of 10";
+    seqBar.querySelector('[data-act="prev"]').disabled = seqStep === 0;
+    seqBar.querySelector('[data-act="next"]').disabled = seqStep === 10;
+  }
+  seqBar.addEventListener("click", function (e) {
+    var a = e.target.getAttribute && e.target.getAttribute("data-act");
+    if (a === "next" && seqStep < 10) seqStep++;
+    else if (a === "prev" && seqStep > 0) seqStep--;
+    else if (a === "all") seqStep = 0;
+    else return;
+    renderSeq();
+  });
+  renderSeq();
+
+  // ---------- Election stepper ----------
+  var NS = "http://www.w3.org/2000/svg";
+  var pos = { n1: [480, 92], n2: [637, 200], n3: [577, 372], n4: [383, 372], n5: [323, 200] };
+  var R = 44;
+  var deadline = { n1: 720, n2: 610, n4: 940, n5: 830 };
+  function f(t, id) { return Math.min(1, t / deadline[id]); }
+
+  var steps = [
+    { clock: "Normal running",
+      nodes: { n1: ["fol", 4, "timer keeps resetting", .08], n2: ["fol", 4, "timer keeps resetting", .08], n3: ["lead", 4, "sending heartbeats", null], n4: ["fol", 4, "timer keeps resetting", .08], n5: ["fol", 4, "timer keeps resetting", .08] },
+      arrows: [["n3", "n1", "lead", "heartbeat"], ["n3", "n2", "lead"], ["n3", "n4", "lead"], ["n3", "n5", "lead"]],
+      cap: "<strong>Before the crash.</strong> n3 is leader of term 4 and sends a heartbeat to everyone every 50 ms. Each heartbeat <strong>resets the follower's election timer</strong>, so no follower ever runs out of patience." },
+    { clock: "400 ms after n3 died",
+      nodes: { n1: ["fol", 4, "runs out at 720 ms", f(400, "n1")], n2: ["fol", 4, "runs out at 610 ms", f(400, "n2")], n3: ["dead", 4, "process killed", null], n4: ["fol", 4, "runs out at 940 ms", f(400, "n4")], n5: ["fol", 4, "runs out at 830 ms", f(400, "n5")] },
+      arrows: [],
+      cap: "<strong>n3 is killed.</strong> The heartbeats just stop. No message says “I died”. Each follower's timer keeps running, and each one picked a <strong>different random deadline</strong> between 500 and 1000 ms, so they won't all react at once." },
+    { clock: "610 ms after n3 died",
+      nodes: { n1: ["fol", 4, "runs out at 720 ms", f(610, "n1")], n2: ["cand", 5, "voted for itself", .02], n3: ["dead", 4, "process killed", null], n4: ["fol", 4, "runs out at 940 ms", f(610, "n4")], n5: ["fol", 4, "runs out at 830 ms", f(610, "n5")] },
+      arrows: [],
+      cap: "<strong>n2's timer runs out first.</strong> It becomes a <strong>candidate</strong>, moves to <strong>term 5</strong>, votes for itself, and saves that vote to disk. Nobody told it to do this. Its own timer decided." },
+    { clock: "~611 ms",
+      nodes: { n1: ["fol", 4, "", f(611, "n1")], n2: ["cand", 5, "votes: 1 (itself)", .02], n3: ["dead", 4, "process killed", null], n4: ["fol", 4, "", f(611, "n4")], n5: ["fol", 4, "", f(611, "n5")] },
+      arrows: [["n2", "n1", "cand", "vote for me? term 5", [600, 126]], ["n2", "n5", "cand"], ["n2", "n4", "cand"], ["n2", "n3", "dead", "no answer", [656, 322]]],
+      cap: "<strong>n2 asks everyone to vote for it</strong>: “Make me leader of term 5. My log ends at entry #1043 from term 4.” The request to n3 goes nowhere." },
+    { clock: "~615 ms",
+      nodes: { n1: ["fol", 5, "voted n2 (on disk)", .01], n2: ["cand", 5, "votes: 4 of 5", .03], n3: ["dead", 4, "process killed", null], n4: ["fol", 5, "voted n2 (on disk)", .01], n5: ["fol", 5, "voted n2 (on disk)", .01] },
+      arrows: [["n1", "n2", "fol", "yes"], ["n5", "n2", "fol"], ["n4", "n2", "fol"]],
+      cap: "<strong>Each follower decides for itself.</strong> It sees term 5 is newer than its term 4, so it moves up to term 5. It hasn't voted in term 5 yet, and n2's log is at least as up to date as its own. So it <strong>saves its vote to disk</strong>, then replies yes, and resets its own timer." },
+    { clock: "~616 ms",
+      nodes: { n1: ["fol", 5, "following n2", .02], n2: ["lead", 5, "sending heartbeats", null], n3: ["dead", 4, "process killed", null], n4: ["fol", 5, "following n2", .02], n5: ["fol", 5, "following n2", .02] },
+      arrows: [["n2", "n1", "lead", "heartbeat"], ["n2", "n5", "lead"], ["n2", "n4", "lead"]],
+      cap: "<strong>3 votes is a majority of 5, so n2 is leader of term 5</strong>. It needed only the third vote. It adds an empty entry to its log to establish its term, and starts heartbeats, which keep everyone else's timers from running out. Writes start flowing again, and the CLI finds n2 by retrying." },
+    { clock: "Later: n3 is restarted",
+      nodes: { n1: ["fol", 5, "following n2", .05], n2: ["lead", 5, "sending heartbeats", null], n3: ["fol", 5, "catching up the log", .05], n4: ["fol", 5, "following n2", .05], n5: ["fol", 5, "following n2", .05] },
+      arrows: [["n2", "n1", "lead"], ["n2", "n5", "lead"], ["n2", "n4", "lead"], ["n2", "n3", "lead", "missing entries", [668, 322]]],
+      cap: "<strong>n3 comes back as a follower.</strong> It reloads term 4 and its log from disk, then receives n2's heartbeat for term 5. A higher term always wins, so n3 accepts n2 as leader. n2 sends it whatever entries it missed, or a snapshot if it's far behind." }
+  ];
+
+  var elect = document.getElementById("elect");
+  var gA = document.getElementById("elect-arrows");
+  var gN = document.getElementById("elect-nodes");
+  var clock = document.getElementById("elect-clock");
+  var eBar = document.querySelector('.stepper[data-for="elect"]');
+  var eStep = 0;
+  var roleName = { lead: "leader", fol: "follower", cand: "candidate", dead: "crashed" };
+
+  function el(tag, attrs, text) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function renderElect() {
+    var s = steps[eStep];
+    while (gA.firstChild) gA.removeChild(gA.firstChild);
+    while (gN.firstChild) gN.removeChild(gN.firstChild);
+    clock.textContent = s.clock;
+
+    s.arrows.forEach(function (a) {
+      var p = pos[a[0]], q = pos[a[1]];
+      var dx = q[0] - p[0], dy = q[1] - p[1], L = Math.sqrt(dx * dx + dy * dy);
+      var ux = dx / L, uy = dy / L;
+      var x1 = p[0] + ux * (R + 4), y1 = p[1] + uy * (R + 4);
+      var x2 = q[0] - ux * (R + 8), y2 = q[1] - uy * (R + 8);
+      var cls = "ln-" + a[2] + (a[2] === "dead" ? " dash" : "");
+      gA.appendChild(el("path", { d: "M" + x1 + "," + y1 + " L" + x2 + "," + y2, "class": cls, "marker-end": "url(#ah-" + a[2] + ")" }));
+      if (a[3]) {
+        // Sit the label a bit past the middle, away from the sender's own caption.
+        var mx = x1 + (x2 - x1) * 0.62, my = y1 + (y2 - y1) * 0.62;
+        var nx = -uy, ny = ux; // perpendicular
+        if (ny > 0) { nx = -nx; ny = -ny; } // put label on the upper side
+        var lx = a[4] ? a[4][0] : mx + nx * 14, ly = a[4] ? a[4][1] : my + ny * 14 + 4;
+        var t = el("text", { x: lx, y: ly, "class": "xs mid c-" + a[2] + " b" }, a[3]);
+        gA.appendChild(t);
+      }
+    });
+
+    Object.keys(pos).forEach(function (id) {
+      var n = s.nodes[id], p = pos[id];
+      var g = el("g", {});
+      g.appendChild(el("circle", { cx: p[0], cy: p[1], r: R, "class": n[0] }));
+      g.appendChild(el("text", { x: p[0], y: p[1] - 8, "class": "h mid" }, id));
+      g.appendChild(el("text", { x: p[0], y: p[1] + 9, "class": "xs mid" }, roleName[n[0]]));
+      g.appendChild(el("text", { x: p[0], y: p[1] + 24, "class": "xs mid" }, "term " + n[1]));
+      if (n[0] === "dead") {
+        g.appendChild(el("path", { d: "M" + (p[0] - 30) + "," + (p[1] - 30) + " L" + (p[0] + 30) + "," + (p[1] + 30) + " M" + (p[0] + 30) + "," + (p[1] - 30) + " L" + (p[0] - 30) + "," + (p[1] + 30), "class": "ln-dead", style: "opacity:.35" }));
+      }
+      var by = p[1] + R + 10;
+      if (n[3] != null) {
+        g.appendChild(el("rect", { x: p[0] - 50, y: by, width: 100, height: 8, rx: 4, "class": "tbar-bg" }));
+        g.appendChild(el("rect", { x: p[0] - 50, y: by, width: Math.max(2, 100 * n[3]), height: 8, rx: 4, "class": "tbar" + (n[3] >= 0.8 ? " hot" : "") }));
+      }
+      if (n[2]) g.appendChild(el("text", { x: p[0], y: by + 24, "class": "xs mid" }, n[2]));
+      gN.appendChild(g);
+    });
+
+    document.getElementById("elect-cap").innerHTML = s.cap;
+    eBar.querySelector(".count").textContent = "Step " + (eStep + 1) + " of " + steps.length;
+    eBar.querySelector('[data-act="prev"]').disabled = eStep === 0;
+    eBar.querySelector('[data-act="next"]').disabled = eStep === steps.length - 1;
+  }
+  eBar.addEventListener("click", function (e) {
+    var a = e.target.getAttribute && e.target.getAttribute("data-act");
+    if (a === "next" && eStep < steps.length - 1) eStep++;
+    else if (a === "prev" && eStep > 0) eStep--;
+    else return;
+    renderElect();
+  });
+  renderElect();
+})();
+</script>
+</body>
+</html>
